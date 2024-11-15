@@ -4,3 +4,12 @@ out = "out"
 libs = ["lib"]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+
+solc_version = '0.8.26'
+evm_version = "cancun"
+optimizer_runs = 800
+via_ir = false
+ffi = true
+
+[rpc_endpoints]
+unichain = "https://unichain-sepolia.g.alchemy.com/v2/aDKJq_J0-enA7NOA3ln8Ra7eujzxWx70"
