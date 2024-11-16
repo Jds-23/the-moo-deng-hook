@@ -10,6 +10,7 @@ import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 import {FullMath} from "v4-core/libraries/FullMath.sol";
 import {SafeCast} from "v4-core/libraries/SafeCast.sol";
+import {console} from "forge-std/console.sol";
 
 contract TheHook is BaseHook {
     using LPFeeLibrary for uint24;
@@ -74,7 +75,7 @@ contract TheHook is BaseHook {
 
         if (poolToPrvSqrtPriceX96[poolId] == 0) {
             poolToPrvSqrtPriceX96[poolId] = currentSqrtPriceX96;
-            poolToCurrentFeeDelta[poolId] = BASE_FEE;
+            poolToCurrentFeeDelta[poolId] = 0;
             return;
         }
 
