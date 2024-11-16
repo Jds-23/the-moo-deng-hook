@@ -38,7 +38,7 @@ contract TheHook is BaseHook {
     {
         return
             Hooks.Permissions({
-                beforeInitialize: true, // we need to set the initial fee
+                beforeInitialize: true, // we check for dynamic fee
                 afterInitialize: false,
                 beforeAddLiquidity: false,
                 beforeRemoveLiquidity: false,
