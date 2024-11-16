@@ -6,14 +6,27 @@ import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {LPFeeLibrary} from "v4-core/libraries/LPFeeLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-core/types/BeforeSwapDelta.sol";
-
+import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
+import {FullMath} from "v4-core/libraries/FullMath.sol";
+import {SafeCast} from "v4-core/libraries/SafeCast.sol";
 contract TheHook is BaseHook {
     using LPFeeLibrary for uint24;
+    using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
     error MustUseDynamicFee();
 
     // The default base fees we will charge
     uint24 public constant BASE_FEE = 3000; // 0.3%
+    uint256 public constant MULTIPLIER = 7500; // 0.75%
+    uint24 public constant MULTIPLIER_DIVISOR = 1000000;
+
+    mapping(PoolId => uint256) public poolToLastUpdatedBN;
+    mapping(PoolId => uint160) public poolToPrvSqrtPriceX96;
+
+    mapping(PoolId => uint24) public poolToCurrentFeeDelta;
+    mapping(PoolId => int8) public poolToCurrentFeeDeltaSign;
 
     constructor(IPoolManager poolManager) BaseHook(poolManager) {}
 
@@ -25,7 +38,7 @@ contract TheHook is BaseHook {
     {
         return
             Hooks.Permissions({
-                beforeInitialize: true, // we need to set the initial fee
+                beforeInitialize: true, // we check for dynamic fee
                 afterInitialize: false,
                 beforeAddLiquidity: false,
                 beforeRemoveLiquidity: false,
@@ -51,18 +64,54 @@ contract TheHook is BaseHook {
         return this.beforeInitialize.selector;
     }
 
-    function getFee() internal view returns (uint24) {
-        uint256 blockNum = block.number;
-        if (blockNum % 10 == 0) {
-            return BASE_FEE * 2;
+    function setFee(PoolId poolId) internal {
+        (uint160 currentSqrtPriceX96, , , ) = poolManager.getSlot0(poolId);
+
+        if (currentSqrtPriceX96 == poolToPrvSqrtPriceX96[poolId]) {
+            return;
         }
-        return BASE_FEE;
+
+        if (poolToPrvSqrtPriceX96[poolId] == 0) {
+            poolToPrvSqrtPriceX96[poolId] = currentSqrtPriceX96;
+            poolToCurrentFeeDelta[poolId] = 0;
+            return;
+        }
+
+        uint160 sqrtPriceDelta = 0;
+
+        if (poolToPrvSqrtPriceX96[poolId] > currentSqrtPriceX96) {
+            sqrtPriceDelta =
+                poolToPrvSqrtPriceX96[poolId] -
+                currentSqrtPriceX96;
+            poolToCurrentFeeDeltaSign[poolId] = -1;
+        } else {
+            sqrtPriceDelta =
+                currentSqrtPriceX96 -
+                poolToPrvSqrtPriceX96[poolId];
+            poolToCurrentFeeDeltaSign[poolId] = 1;
+        }
+
+        // fee = fee - c*delta, where c is a constant
+        uint256 feeToChange = FullMath.mulDiv(
+            MULTIPLIER,
+            sqrtPriceDelta,
+            MULTIPLIER_DIVISOR
+        );
+
+        if (feeToChange >= uint256(BASE_FEE)) {
+            poolToCurrentFeeDelta[poolId] = BASE_FEE;
+        } else {
+            // if poolToCurrentFeeDelta a uint256 is less than BASE_FEE a uint24, there should no value loss by downcasting
+            poolToCurrentFeeDelta[poolId] = uint24(feeToChange);
+        }
+
+        poolToPrvSqrtPriceX96[poolId] = currentSqrtPriceX96;
     }
 
     function beforeSwap(
         address,
         PoolKey calldata key,
-        IPoolManager.SwapParams calldata,
+        IPoolManager.SwapParams calldata params,
         bytes calldata
     )
         external
@@ -70,7 +119,25 @@ contract TheHook is BaseHook {
         onlyPoolManager
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        uint24 fee = getFee();
+        if (poolToLastUpdatedBN[key.toId()] < block.number) {
+            poolToLastUpdatedBN[key.toId()] = block.number;
+            setFee(key.toId());
+        }
+
+        uint24 fee = BASE_FEE;
+        if (params.zeroForOne) {
+            if (poolToCurrentFeeDeltaSign[key.toId()] == -1) {
+                fee = fee + poolToCurrentFeeDelta[key.toId()];
+            } else {
+                fee = fee - poolToCurrentFeeDelta[key.toId()];
+            }
+        } else {
+            if (poolToCurrentFeeDeltaSign[key.toId()] == 1) {
+                fee = fee + poolToCurrentFeeDelta[key.toId()];
+            } else {
+                fee = fee - poolToCurrentFeeDelta[key.toId()];
+            }
+        }
 
         uint24 feeWithFlag = fee | LPFeeLibrary.OVERRIDE_FEE_FLAG;
         return (

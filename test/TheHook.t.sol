@@ -15,12 +15,20 @@ import {PoolSwapTest} from "v4-core/test/PoolSwapTest.sol";
 import {TheHook} from "../src/TheHook.sol";
 import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {console} from "forge-std/console.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
+import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
+import {IHooks} from "v4-core/interfaces/IHooks.sol";
 
 contract TestTheHook is Test, Deployers {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
     TheHook hook;
+
+    PoolKey standardPoolKey;
+
+    uint24 public constant BASE_FEE = 3000; // 0.3%
 
     function setUp() public {
         // Deploy v4-core
@@ -48,6 +56,15 @@ contract TestTheHook is Test, Deployers {
             SQRT_PRICE_1_1
         );
 
+        // Initialize a pool
+        (standardPoolKey, ) = initPool(
+            currency0,
+            currency1,
+            IHooks(address(0)),
+            BASE_FEE, // Set the `BASE_FEE` as a fixed fee
+            SQRT_PRICE_1_1
+        );
+
         // Add some liquidity
         modifyLiquidityRouter.modifyLiquidity(
             key,
@@ -59,167 +76,221 @@ contract TestTheHook is Test, Deployers {
             }),
             ZERO_BYTES
         );
+
+        // Add some liquidity
+        modifyLiquidityRouter.modifyLiquidity(
+            standardPoolKey,
+            IPoolManager.ModifyLiquidityParams({
+                tickLower: -60,
+                tickUpper: 60,
+                liquidityDelta: 100 ether,
+                salt: bytes32(0)
+            }),
+            ZERO_BYTES
+        );
     }
 
-    // function test_feeUpdatesWithGasPrice() public {
-    //     // Set up our swap parameters
-    //     PoolSwapTest.TestSettings memory testSettings = PoolSwapTest
-    //         .TestSettings({takeClaims: false, settleUsingBurn: false});
-
-    //     IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
-    //         zeroForOne: true,
-    //         amountSpecified: -0.00001 ether,
-    //         sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-    //     });
-
-    //     // Current gas price is 10 gwei
-    //     // Moving average should also be 10
-    //     uint128 gasPrice = uint128(tx.gasprice);
-    //     uint128 movingAverageGasPrice = hook.movingAverageGasPrice();
-    //     uint104 movingAverageGasPriceCount = hook.movingAverageGasPriceCount();
-    //     assertEq(gasPrice, 10 gwei);
-    //     assertEq(movingAverageGasPrice, 10 gwei);
-    //     assertEq(movingAverageGasPriceCount, 1);
-
-    //     // ----------------------------------------------------------------------
-    //     // ----------------------------------------------------------------------
-    //     // ----------------------------------------------------------------------
-    //     // ----------------------------------------------------------------------
-
-    //     // 1. Conduct a swap at gasprice = 10 gwei
-    //     // This should just use `BASE_FEE` since the gas price is the same as the current average
-    //     uint256 balanceOfToken1Before = currency1.balanceOfSelf();
-    //     swapRouter.swap(key, params, testSettings, ZERO_BYTES);
-    //     uint256 balanceOfToken1After = currency1.balanceOfSelf();
-    //     uint256 outputFromBaseFeeSwap = balanceOfToken1After -
-    //         balanceOfToken1Before;
-
-    //     assertGt(balanceOfToken1After, balanceOfToken1Before);
-
-    //     // Our moving average shouldn't have changed
-    //     // only the count should have incremented
-    //     movingAverageGasPrice = hook.movingAverageGasPrice();
-    //     movingAverageGasPriceCount = hook.movingAverageGasPriceCount();
-    //     assertEq(movingAverageGasPrice, 10 gwei);
-    //     assertEq(movingAverageGasPriceCount, 2);
-
-    //     // ----------------------------------------------------------------------
-    //     // ----------------------------------------------------------------------
-    //     // ----------------------------------------------------------------------
-    //     // ----------------------------------------------------------------------
-
-    //     // 2. Conduct a swap at lower gasprice = 4 gwei
-    //     // This should have a higher transaction fees
-    //     vm.txGasPrice(4 gwei);
-    //     balanceOfToken1Before = currency1.balanceOfSelf();
-    //     swapRouter.swap(key, params, testSettings, ZERO_BYTES);
-    //     balanceOfToken1After = currency1.balanceOfSelf();
-
-    //     uint256 outputFromIncreasedFeeSwap = balanceOfToken1After -
-    //         balanceOfToken1Before;
-
-    //     assertGt(balanceOfToken1After, balanceOfToken1Before);
-
-    //     // Our moving average should now be (10 + 10 + 4) / 3 = 8 Gwei
-    //     movingAverageGasPrice = hook.movingAverageGasPrice();
-    //     movingAverageGasPriceCount = hook.movingAverageGasPriceCount();
-    //     assertEq(movingAverageGasPrice, 8 gwei);
-    //     assertEq(movingAverageGasPriceCount, 3);
-
-    //     // ----------------------------------------------------------------------
-    //     // ----------------------------------------------------------------------
-    //     // ----------------------------------------------------------------------
-    //     // ----------------------------------------------------------------------
-
-    //     // 3. Conduct a swap at higher gas price = 12 gwei
-    //     // This should have a lower transaction fees
-    //     vm.txGasPrice(12 gwei);
-    //     balanceOfToken1Before = currency1.balanceOfSelf();
-    //     swapRouter.swap(key, params, testSettings, ZERO_BYTES);
-    //     balanceOfToken1After = currency1.balanceOfSelf();
-
-    //     uint outputFromDecreasedFeeSwap = balanceOfToken1After -
-    //         balanceOfToken1Before;
-
-    //     assertGt(balanceOfToken1After, balanceOfToken1Before);
-
-    //     // Our moving average should now be (10 + 10 + 4 + 12) / 4 = 9 Gwei
-    //     movingAverageGasPrice = hook.movingAverageGasPrice();
-    //     movingAverageGasPriceCount = hook.movingAverageGasPriceCount();
-
-    //     assertEq(movingAverageGasPrice, 9 gwei);
-    //     assertEq(movingAverageGasPriceCount, 4);
-
-    //     // ------
-
-    //     // 4. Check all the output amounts
-
-    //     console.log("Base Fee Output", outputFromBaseFeeSwap);
-    //     console.log("Increased Fee Output", outputFromIncreasedFeeSwap);
-    //     console.log("Decreased Fee Output", outputFromDecreasedFeeSwap);
-
-    //     assertGt(outputFromDecreasedFeeSwap, outputFromBaseFeeSwap);
-    //     assertGt(outputFromBaseFeeSwap, outputFromIncreasedFeeSwap);
-    // }
-
-    function test_feeUpdatesWithBlockNumber() public {
-        // Set up our swap parameters
+    function test_feeForFirstSwapShouldBeBaseFee() public {
+        // Set up swap parameters
         PoolSwapTest.TestSettings memory testSettings = PoolSwapTest
             .TestSettings({takeClaims: false, settleUsingBurn: false});
 
-        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
-            zeroForOne: true,
-            amountSpecified: -0.00001 ether,
-            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-        });
-
-        // First swap at a normal block
-        uint256 currentBlock = block.number;
+        // Get the pool ID and initial state
+        PoolId poolId = key.toId();
+        (uint160 sqrtPriceX96Before, , , ) = manager.getSlot0(poolId);
         uint256 balanceOfToken1Before = currency1.balanceOfSelf();
-        swapRouter.swap(key, params, testSettings, ZERO_BYTES);
-        uint256 balanceOfToken1After = currency1.balanceOfSelf();
-        uint256 outputFromBaseFeeSwap = balanceOfToken1After -
-            balanceOfToken1Before;
 
-        // Move to a block number divisible by 10 (should have higher fees)
-        uint256 nextMultipleOf10 = ((currentBlock / 10) + 1) * 10;
-        vm.roll(nextMultipleOf10);
-
-        balanceOfToken1Before = currency1.balanceOfSelf();
-        swapRouter.swap(key, params, testSettings, ZERO_BYTES);
-        balanceOfToken1After = currency1.balanceOfSelf();
-        uint256 outputFromHigherFeeSwap = balanceOfToken1After -
-            balanceOfToken1Before;
-
-        // Move to next block (should return to base fee)
-        vm.roll(nextMultipleOf10 + 1);
-
-        balanceOfToken1Before = currency1.balanceOfSelf();
-        swapRouter.swap(key, params, testSettings, ZERO_BYTES);
-        balanceOfToken1After = currency1.balanceOfSelf();
-        uint256 outputFromNormalFeeSwap = balanceOfToken1After -
-            balanceOfToken1Before;
-
-        // Log the outputs for inspection
-        console.log("Base Fee Output", outputFromBaseFeeSwap);
-        console.log(
-            "Higher Fee Output (block divisible by 10)",
-            outputFromHigherFeeSwap
+        int256 amountSpecified = -0.01 ether;
+        // Perform the swap
+        (BalanceDelta result, BalanceDelta standardPoolResult) = swap(
+            true,
+            amountSpecified,
+            TickMath.MIN_SQRT_PRICE + 1,
+            testSettings
         );
-        console.log("Normal Fee Output (next block)", outputFromNormalFeeSwap);
 
-        // Higher fees should result in lower output amounts
-        assertGt(outputFromBaseFeeSwap, outputFromHigherFeeSwap);
+        // Get post-swap state
+        (uint160 sqrtPriceX96After, , , ) = manager.getSlot0(poolId);
+        uint256 balanceOfToken1After = currency1.balanceOfSelf();
+        uint24 currentFeeDelta = hook.poolToCurrentFeeDelta(poolId);
 
-        // Check that normal fee swap is within 0.01% of base fee swap
-        uint256 difference;
-        if (outputFromBaseFeeSwap > outputFromNormalFeeSwap) {
-            difference = outputFromBaseFeeSwap - outputFromNormalFeeSwap;
-        } else {
-            difference = outputFromNormalFeeSwap - outputFromBaseFeeSwap;
-        }
+        // Verify the swap was successful
+        assertGt(
+            balanceOfToken1After,
+            balanceOfToken1Before,
+            "Swap should increase token1 balance"
+        );
+        assertLt(
+            sqrtPriceX96After,
+            sqrtPriceX96Before,
+            "Price should decrease for zeroForOne swap"
+        );
+        // Verify currentFeeDelta is zero
+        assertEq(currentFeeDelta, 0, "Fee Delta should be zero");
+        assertEq(result.amount0(), amountSpecified);
+        assertEq(
+            standardPoolResult.amount1(),
+            result.amount1(),
+            "Same fee should have been charged"
+        );
+    }
 
-        // Assert difference is less than 0.01% of the base output
-        assertLt(difference * 10000, outputFromBaseFeeSwap);
+    function test_feeForSwapInSecondBlockShouldBeDynamicFee() public {
+        // Set up swap parameters
+        PoolSwapTest.TestSettings memory testSettings = PoolSwapTest
+            .TestSettings({takeClaims: false, settleUsingBurn: false});
+
+        // Get the pool ID and initial state
+        PoolId poolId = key.toId();
+
+        (uint160 sqrtPriceX96BeforeFirstSwap, , , ) = manager.getSlot0(poolId);
+        // Perform the first swap
+        swap(true, -0.01 ether, TickMath.MIN_SQRT_PRICE + 1, testSettings);
+
+        // jump +1 block
+        vm.roll(block.number + 1);
+
+        // fetch prvSqrtPriceX96
+        uint160 prvSqrtPriceX96 = hook.poolToPrvSqrtPriceX96(poolId);
+
+        // assert sqrtPriceX96BeforeFirstSwap should be equal to prvSqrtPriceX96
+        assertEq(
+            sqrtPriceX96BeforeFirstSwap,
+            prvSqrtPriceX96,
+            "sqrtPriceX96BeforeFirstSwap should be equal to prvSqrtPriceX96"
+        );
+
+        (uint160 sqrtPriceX96BeforeSecondSwap, , , ) = manager.getSlot0(poolId);
+        uint256 balanceOfToken1Before = currency1.balanceOfSelf();
+
+        int256 amountSpecified = -0.01 ether;
+        // Perform the second swap
+        (BalanceDelta result, ) = swap(
+            true,
+            amountSpecified,
+            TickMath.MIN_SQRT_PRICE + 1,
+            testSettings
+        );
+
+        // Get post-swap state
+        (uint160 sqrtPriceX96AfterSecondSwap, , , ) = manager.getSlot0(poolId);
+        uint256 balanceOfToken1After = currency1.balanceOfSelf();
+        uint24 currentFeeDelta = hook.poolToCurrentFeeDelta(poolId);
+
+        assertEq(result.amount0(), amountSpecified);
+
+        // Verify the swap was successful
+        assertGt(
+            balanceOfToken1After,
+            balanceOfToken1Before,
+            "Swap should increase token1 balance"
+        );
+        assertLt(
+            sqrtPriceX96AfterSecondSwap,
+            sqrtPriceX96BeforeSecondSwap,
+            "Price should decrease for zeroForOne swap"
+        );
+        // Verify currentFeeDelta is not zero
+        assertNotEq(currentFeeDelta, 0, "Fee Delta should not be zero");
+    }
+
+    function test_feeForSwapInSecondBlockShouldBeMoreInDynamicFeePoolForSameDirection()
+        public
+    {
+        // Set up swap parameters
+        PoolSwapTest.TestSettings memory testSettings = PoolSwapTest
+            .TestSettings({takeClaims: false, settleUsingBurn: false});
+
+        // Perform the first pool swap
+        swap(true, -0.01 ether, TickMath.MIN_SQRT_PRICE + 1, testSettings);
+
+        // jump +1 block
+        vm.roll(block.number + 1);
+
+        int256 amountSpecified = -0.01 ether;
+
+        // Perform the second pool swap
+        (BalanceDelta result, BalanceDelta standardPoolResult) = swap(
+            true,
+            amountSpecified,
+            TickMath.MIN_SQRT_PRICE + 1,
+            testSettings
+        );
+
+        assertLt(
+            result.amount1(),
+            standardPoolResult.amount1(),
+            "Dynamic fee pool should charge more fee"
+        );
+    }
+
+    function test_feeForSwapInSecondBlockShouldBeLessInDynamicFeePoolForOppositeDirection()
+        public
+    {
+        // Set up swap parameters
+        PoolSwapTest.TestSettings memory testSettings = PoolSwapTest
+            .TestSettings({takeClaims: false, settleUsingBurn: false});
+
+        // Perform the first pool swap
+        swap(true, -0.01 ether, TickMath.MIN_SQRT_PRICE + 1, testSettings);
+
+        // jump +1 block
+        vm.roll(block.number + 1);
+
+        int256 amountSpecified = -1000;
+
+        // Perform the second pool swap
+        (BalanceDelta result, BalanceDelta standardPoolResult) = swap(
+            false,
+            amountSpecified,
+            TickMath.MAX_SQRT_PRICE - 1,
+            testSettings
+        );
+
+        assertGt(
+            result.amount0(),
+            standardPoolResult.amount0(),
+            "Dynamic fee pool should charge more fee"
+        );
+    }
+
+    function swap(
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96,
+        PoolSwapTest.TestSettings memory testSettings
+    ) public returns (BalanceDelta, BalanceDelta) {
+        // copy same trade to dynamic hook pool and a standard pool
+        return (
+            swap(
+                zeroForOne,
+                amountSpecified,
+                sqrtPriceLimitX96,
+                testSettings,
+                key
+            ),
+            swap(
+                zeroForOne,
+                amountSpecified,
+                sqrtPriceLimitX96,
+                testSettings,
+                standardPoolKey
+            )
+        );
+    }
+
+    function swap(
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96,
+        PoolSwapTest.TestSettings memory testSettings,
+        PoolKey memory _key
+    ) public returns (BalanceDelta) {
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: zeroForOne,
+            amountSpecified: amountSpecified,
+            sqrtPriceLimitX96: sqrtPriceLimitX96
+        });
+        return swapRouter.swap(_key, params, testSettings, ZERO_BYTES);
     }
 }
