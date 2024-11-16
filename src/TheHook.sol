@@ -10,8 +10,6 @@ import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 import {FullMath} from "v4-core/libraries/FullMath.sol";
 import {SafeCast} from "v4-core/libraries/SafeCast.sol";
-import {console} from "forge-std/console.sol";
-
 contract TheHook is BaseHook {
     using LPFeeLibrary for uint24;
     using PoolIdLibrary for PoolKey;
@@ -96,7 +94,7 @@ contract TheHook is BaseHook {
         // fee = fee - c*delta, where c is a constant
         uint256 feeToChange = FullMath.mulDiv(
             MULTIPLIER,
-            poolToCurrentFeeDelta[poolId],
+            sqrtPriceDelta,
             MULTIPLIER_DIVISOR
         );
 
