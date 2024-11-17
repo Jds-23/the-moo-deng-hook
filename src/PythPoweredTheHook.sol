@@ -51,7 +51,7 @@ contract PythPoweredTheHook is BaseHook, Ownable {
         pyth = IPyth(_pyth);
     }
 
-    function setPriceFeeID(bytes32 _priceFeedId) public onlyOwner {
+    function setPriceFeedId(bytes32 _priceFeedId) external onlyOwner {
         priceFeedId = _priceFeedId;
     }
 
